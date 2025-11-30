@@ -29,5 +29,25 @@ jobs:
       - name: Install the project
         run: uv sync --all-extras --dev
 
-      - name: Run tests
-        run: uv run pytest -v tests/
+      - name: Determine test type
+        id: test_type
+        run: |
+          # Check if this is a tagged release (v*.*.*)
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "Run full test suite for release tag"
+            echo "test_type=full" >> $GITHUB_OUTPUT
+          # Check if this is a manual run requesting full tests
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.run_full_tests }}" == "true" ]]; then
+            echo "Run full test suite due to manual request"
+            echo "test_type=full" >> $GITHUB_OUTPUT
+          else
+            echo "Run smoke tests for regular development"
+            echo "test_type=smoke" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run unit tests
+        run: uv run pytest -v -m ${{ steps.test_type.outputs.test_type }} tests/
+
+      - name: Run DFDiagnoser
+        run: uv run dfdiagnoser input=checkpoint input.checkpoint_dir=tests/data/dfanalyzer_checkpoints/unet3d_v100 output=file
+

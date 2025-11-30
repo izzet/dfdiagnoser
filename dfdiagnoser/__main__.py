@@ -9,7 +9,7 @@ from . import InputType, OutputType
 from .config import init_hydra_config_store
 from .diagnoser import Diagnoser
 from .input import CheckpointInput
-from .utils.log_utils import configure_logging, console_block
+from .utils.log_utils import configure_logging, console_block, log_block
 
 
 init_hydra_config_store()
@@ -27,6 +27,8 @@ def main(cfg: DictConfig):
 
     with console_block("Diagnoser setup"):
         diagnoser: Diagnoser = instantiate(cfg.diagnoser)
+    
+    with log_block("Input and output setup"):
         input: InputType = instantiate(cfg.input)
         output: OutputType = instantiate(cfg.output)
 

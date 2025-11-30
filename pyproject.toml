@@ -26,3 +26,9 @@ dfdiagnoser = "dfdiagnoser.__main__:main"
 
 [dependency-groups]
 dev = ["ipykernel>=6", "pytest>=8", "ruff>=0.12.0"]
+
+[tool.pytest.ini_options]
+markers = [
+    "smoke: minimal test subset for quick validation (select with '-m smoke')",
+    "full: comprehensive test suite with all parameter combinations (select with '-m full')",
+]
