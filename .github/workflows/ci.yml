@@ -49,5 +49,9 @@ jobs:
         run: uv run pytest -v -m ${{ steps.test_type.outputs.test_type }} tests/
 
       - name: Run DFDiagnoser
-        run: uv run dfdiagnoser input=checkpoint input.checkpoint_dir=tests/data/dfanalyzer_checkpoints/unet3d_v100 output=file
-
+        run: |
+          uv run dfdiagnoser \
+            input=checkpoint \
+            input.checkpoint_dir=${{ github.workspace }}/tests/data/dfanalyzer_checkpoints/unet3d_v100 \
+            output=file \
+            output.output_format=json
