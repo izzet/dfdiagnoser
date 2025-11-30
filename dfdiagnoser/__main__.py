@@ -1,9 +1,11 @@
 import hydra
 # import signal
+import os
 import structlog
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from pathlib import Path
 
 from . import InputType, OutputType
 from .config import init_hydra_config_store
@@ -33,7 +35,9 @@ def main(cfg: DictConfig):
         output: OutputType = instantiate(cfg.output)
 
     if isinstance(input, CheckpointInput):
-        diagnosis_result = diagnoser.diagnose_checkpoint(input.checkpoint_dir)
+        # Resolve checkpoint_dir to absolute path to handle working directory changes
+        checkpoint_dir = Path(input.checkpoint_dir).resolve()
+        diagnosis_result = diagnoser.diagnose_checkpoint(str(checkpoint_dir))
         with console_block("Output"):
             output.handle_result(diagnosis_result)
     # elif isinstance(input, ZMQInput):
