@@ -37,7 +37,8 @@ class FileOutput(Output):
                 scored_flat_view.to_json(output_path, orient="index")
             elif self.output_format == "csv":
                 scored_flat_view.to_csv(output_path, index=True)
-            # Add more formats as needed
+            elif self.output_format == "parquet":
+                scored_flat_view.to_parquet(output_path, index=True)
             else:
                 raise ValueError(
                     f"Unsupported output format: {self.output_format}")
