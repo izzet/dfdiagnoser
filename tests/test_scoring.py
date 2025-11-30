@@ -4,6 +4,9 @@ import numpy as np
 from dfdiagnoser.scoring import score_metrics
 
 
+pytestmark = [pytest.mark.smoke, pytest.mark.full]
+
+
 @pytest.fixture
 def sample_df():
     return pd.DataFrame({
