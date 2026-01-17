@@ -8,11 +8,11 @@ from typing import List, Union
 
 from .config import init_hydra_config_store
 from .diagnoser import Diagnoser
-from .input import CheckpointInput
+from .input import CheckpointInput, MofkaInput
 from .output import ConsoleOutput, FileOutput
 from .utils.log_utils import configure_logging, log_block
 
-InputType = Union[CheckpointInput]
+InputType = Union[CheckpointInput, MofkaInput]
 OutputType = Union[ConsoleOutput, FileOutput]
 
 
@@ -35,6 +35,25 @@ class DFDiagnoserInstance:
         return self.diagnoser.diagnose_checkpoint(
             checkpoint_dir=checkpoint_dir,
             metric_boundaries=metric_boundaries
+        )
+
+    def diagnose_mofka(self, group_file: str = None, topic_name: str = None):
+        """Diagnose streamed Mofka output using the configured diagnoser."""
+        if not isinstance(self.input, MofkaInput):
+            raise ValueError("Input is not MofkaInput")
+        if group_file is None:
+            group_file = self.input.group_file
+        if topic_name is None:
+            topic_name = self.input.topic_name
+        if "metric_boundaries" in self.hydra_config:
+            metric_boundaries = OmegaConf.to_object(self.hydra_config.metric_boundaries)
+        else:
+            metric_boundaries = {}
+        return self.diagnoser.diagnose_mofka(
+            group_file=group_file,
+            topic_name=topic_name,
+            metric_boundaries=metric_boundaries,
+            output_handler=self.output.handle_result,
         )
 
     def handle_result(self, result):
@@ -78,6 +97,13 @@ def init_with_hydra(hydra_overrides: List[str]):
     )
 
 
-__all__ = ["InputType", "OutputType",
-           "CheckpointInput", "ConsoleOutput", "FileOutput",
-           "DFDiagnoserInstance", "init_with_hydra"]
+__all__ = [
+    "InputType",
+    "OutputType",
+    "CheckpointInput",
+    "MofkaInput",
+    "ConsoleOutput",
+    "FileOutput",
+    "DFDiagnoserInstance",
+    "init_with_hydra",
+]

@@ -10,7 +10,7 @@ from pathlib import Path
 from . import InputType, OutputType
 from .config import init_hydra_config_store
 from .diagnoser import Diagnoser
-from .input import CheckpointInput
+from .input import CheckpointInput, MofkaInput
 from .utils.log_utils import configure_logging, console_block, log_block
 
 
@@ -40,6 +40,12 @@ def main(cfg: DictConfig):
         diagnosis_result = diagnoser.diagnose_checkpoint(str(checkpoint_dir))
         with console_block("Output"):
             output.handle_result(diagnosis_result)
+    elif isinstance(input, MofkaInput):
+        diagnoser.diagnose_mofka(
+            group_file=input.group_file,
+            topic_name=input.topic_name,
+            output_handler=output.handle_result,
+        )
     # elif isinstance(input, ZMQInput):
     #     diagnosis_stream = diagnoser.diagnose_zmq(input.address)
     #     diagnosis_stream.start()

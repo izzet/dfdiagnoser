@@ -195,3 +195,9 @@ cython_debug/
 
 # DFDiagnoser
 outputs/
+
+# Spack
+/spack.lock
+/._view
+/view
+/.spack-env
