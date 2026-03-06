@@ -35,6 +35,9 @@ SLOPE_BINS = [
 def score_metrics(df: pd.DataFrame, metric_boundaries: dict) -> pd.DataFrame:
     metrics = [col for col in df.columns if not col.startswith('d_')]
 
+    df = df.copy()
+    df[metrics] = df[metrics].apply(pd.to_numeric, errors='coerce')
+
     score_cols = {}
 
     for metric in metrics:

@@ -37,7 +37,15 @@ class DFDiagnoserInstance:
             metric_boundaries=metric_boundaries
         )
 
-    def diagnose_mofka(self, group_file: str = None, topic_name: str = None):
+    def diagnose_mofka(
+        self,
+        group_file: str = None,
+        topic_name: str = None,
+        consumer_name: str = None,
+        idle_timeout_sec: int = None,
+        pull_timeout_ms: int = None,
+        output_topic: str = None,
+    ):
         """Diagnose streamed Mofka output using the configured diagnoser."""
         if not isinstance(self.input, MofkaInput):
             raise ValueError("Input is not MofkaInput")
@@ -45,6 +53,14 @@ class DFDiagnoserInstance:
             group_file = self.input.group_file
         if topic_name is None:
             topic_name = self.input.topic_name
+        if consumer_name is None:
+            consumer_name = self.input.consumer_name
+        if idle_timeout_sec is None:
+            idle_timeout_sec = self.input.idle_timeout_sec
+        if pull_timeout_ms is None:
+            pull_timeout_ms = self.input.pull_timeout_ms
+        if output_topic is None:
+            output_topic = getattr(self.input, "output_topic", "")
         if "metric_boundaries" in self.hydra_config:
             metric_boundaries = OmegaConf.to_object(self.hydra_config.metric_boundaries)
         else:
@@ -54,6 +70,10 @@ class DFDiagnoserInstance:
             topic_name=topic_name,
             metric_boundaries=metric_boundaries,
             output_handler=self.output.handle_result,
+            consumer_name=consumer_name,
+            idle_timeout_sec=idle_timeout_sec,
+            pull_timeout_ms=pull_timeout_ms,
+            output_topic=output_topic,
         )
 
     def handle_result(self, result):

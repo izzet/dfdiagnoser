@@ -20,6 +20,10 @@ class MofkaInputConfig(InputConfig):
     _target_: str = "dfdiagnoser.input.MofkaInput"
     group_file: str = MISSING
     topic_name: str = MISSING
+    consumer_name: str = ""
+    idle_timeout_sec: int = 30
+    pull_timeout_ms: int = 1000
+    output_topic: str = ""
 
 
 @dc.dataclass

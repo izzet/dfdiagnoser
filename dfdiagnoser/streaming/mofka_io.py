@@ -52,9 +52,10 @@ def open_consumer(
     logger.info("mofka.topic.open.start", topic=topic_name)
     topic = driver.open_topic(topic_name)
     logger.info("mofka.topic.open.done", topic=topic_name)
-    logger.info("mofka.consumer.open", topic=topic_name, name=consumer_name or "dftracer-analyzer")
+    effective_name = consumer_name or f"dfdiagnoser_{os.getpid()}"
+    logger.info("mofka.consumer.open", topic=topic_name, name=effective_name)
     consumer = topic.consumer(
-        name=consumer_name or "dftracer-analyzer",
+        name=effective_name,
         thread_pool=driver.default_thread_pool,
         batch_size=mofka.AdaptiveBatchSize,
         data_allocator=mofka.ByteArrayAllocator,
