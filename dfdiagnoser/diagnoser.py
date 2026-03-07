@@ -205,7 +205,12 @@ class Diagnoser:
                         event_index=event_count,
                     )
 
-                self.state.advance_window()
+                # Only advance the analysis window after facts events (epoch
+                # boundaries), not after flat_view events which are just scored
+                # data.  This ensures consecutive epochs produce consecutive
+                # window indices so persistence tracking works correctly.
+                if artifact_type == "analysis_facts":
+                    self.state.advance_window()
                 event.acknowledge()
                 future = consumer.pull()
 
@@ -305,9 +310,17 @@ class Diagnoser:
                 severity_label = "unknown"
 
             # scope is a nested dict: {"entity": str, "layer": str|null, ...}
+            # For per_row facts, entity is the row index (e.g., "0", "1") which
+            # changes every epoch — use view_type instead so the same fact_type
+            # accumulates into one tracker for longitudinal persistence tracking.
             scope = fact.get("scope", "global")
             if isinstance(scope, dict):
-                scope_key = scope.get("entity", "global")
+                entity = scope.get("entity", "global")
+                # Numeric entities are per-row indices; use view_type for tracking
+                if entity.isdigit():
+                    scope_key = envelope.get("view_type", "global")
+                else:
+                    scope_key = entity
             else:
                 scope_key = str(scope)
 
@@ -459,7 +472,7 @@ class Diagnoser:
                 "recommendation_bundle": finding.recommendation_bundle,
                 "opportunity_tags": finding.opportunity_tags,
                 "summary": finding.summary,
-                "window_index": finding.trend.peak_severity_window,
+                "window_index": self.state.current_window,
             }
             payload = json.dumps(payload_dict).encode("utf-8")
             metadata = {
