@@ -21,7 +21,7 @@ class MofkaInputConfig(InputConfig):
     group_file: str = MISSING
     topic_name: str = MISSING
     consumer_name: str = ""
-    idle_timeout_sec: int = 30
+    idle_timeout_sec: int = 0
     pull_timeout_ms: int = 1000
     output_topic: str = ""
 

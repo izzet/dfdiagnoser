@@ -12,12 +12,16 @@ class TrendEvidence:
     persistence: int
     onset_window: int
     peak_severity_window: int
+    last_seen_window: int
+    support_windows: int
     trend_direction: str  # "worsening", "improving", "stable", "insufficient_data"
 
 
 @dc.dataclass
 class DiagnosisFinding:
     finding_type: str
+    scope: str
+    layer: Optional[str]
     motif: str  # "warmup_transient", "persistent_pressure", "rank_skew_induced", "checkpoint_tail_risk", "unclassified"
     severity: str
     confidence: float

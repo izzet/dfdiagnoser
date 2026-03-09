@@ -27,11 +27,12 @@ class FactTracker:
         self.observations.append(obs)
         self._windows_seen.add(obs.window_index)
 
-    def prevalence(self) -> float:
+    def prevalence(self, total_windows: Optional[int] = None) -> float:
         """Fraction of total windows where this fact was observed."""
-        if self._total_windows == 0:
+        effective_total = total_windows if total_windows is not None else self._total_windows
+        if effective_total == 0:
             return 0.0
-        return len(self._windows_seen) / self._total_windows
+        return len(self._windows_seen) / effective_total
 
     def persistence(self) -> int:
         """Longest consecutive run of windows with this fact."""
@@ -51,6 +52,17 @@ class FactTracker:
     def update_total_windows(self, total: int):
         self._total_windows = total
 
+    def support_windows(self) -> int:
+        return len(self._windows_seen)
+
+    def last_seen_window(self) -> Optional[int]:
+        if not self._windows_seen:
+            return None
+        return max(self._windows_seen)
+
+    def observed_in_window(self, window_index: int) -> bool:
+        return window_index in self._windows_seen
+
 
 class DiagnosisStateStore:
     """In-memory store for longitudinal diagnosis state."""
@@ -67,6 +79,14 @@ class DiagnosisStateStore:
         self.current_window += 1
         for tracker in self._trackers.values():
             tracker.update_total_windows(self.current_window)
+
+    def effective_total_windows(self) -> int:
+        max_seen_window = -1
+        for tracker in self._trackers.values():
+            last_seen = tracker.last_seen_window()
+            if last_seen is not None:
+                max_seen_window = max(max_seen_window, last_seen)
+        return max(self.current_window, max_seen_window + 1)
 
     def record_scored_summary(self, scored_df: pd.DataFrame):
         """Extract and store summary stats from a scored flat view."""
