@@ -10,6 +10,7 @@ import pandas as pd
 import structlog
 
 from .scoring import score_metrics
+from .trend import TrendStrategy, get_trend_strategy
 from .types import DiagnosisResult
 from .utils.log_utils import console_block
 
@@ -31,10 +32,14 @@ def install_shutdown_handler():
 
 
 class Diagnoser:
-    def __init__(self):
+    def __init__(self, trend_strategy: str = "fixed", trend_lookback: int = 3,
+                 **trend_kwargs):
         from .state import DiagnosisStateStore
 
         self.state = DiagnosisStateStore()
+        self._trend: TrendStrategy = get_trend_strategy(
+            trend_strategy, lookback=trend_lookback, **trend_kwargs,
+        )
 
     def diagnose_checkpoint(self, checkpoint_dir: str, metric_boundaries: dict = {}):
         if not os.path.exists(checkpoint_dir):
@@ -337,6 +342,7 @@ class Diagnoser:
 
         touched_keys = set()
         for fact in facts:
+            logger.debug("diagnoser.fact.detail", **fact)
             # severity is a nested dict: {"score": float, "label": str, ...}
             severity = fact.get("severity", {})
             if isinstance(severity, dict):
@@ -352,6 +358,7 @@ class Diagnoser:
             # accumulates into one tracker for longitudinal persistence tracking.
             scope = fact.get("scope", "global")
             if isinstance(scope, dict):
+                node = scope.get("node", "")
                 layer = scope.get("layer")
                 entity = str(scope.get("entity", "global"))
                 # Numeric entities are per-row indices; use view_type for tracking
@@ -361,6 +368,9 @@ class Diagnoser:
                     scope_key = entity
                 if layer:
                     scope_key = f"{layer}:{scope_key}"
+                # Per-node scope: prepend node for independent tracking
+                if node:
+                    scope_key = f"node:{node}:{scope_key}" if scope_key else f"node:{node}"
             else:
                 scope_key = str(scope)
 
@@ -375,6 +385,7 @@ class Diagnoser:
                 severity_label=severity_label,
                 evidence=fact.get("evidence", {}),
                 opportunity_tags=fact.get("opportunity_tags", []),
+                suppresses_tags=fact.get("suppresses_tags", []),
             )
             key = (fact.get("fact_type", "unknown"), scope_key)
             self.state.record_fact(key, obs)
@@ -431,20 +442,9 @@ class Diagnoser:
             if last_seen_window is None:
                 last_seen_window = peak_window
 
-            # Determine trend direction
-            if len(tracker.observations) >= 2:
-                first_half = tracker.observations[: len(tracker.observations) // 2]
-                second_half = tracker.observations[len(tracker.observations) // 2 :]
-                avg_first = sum(o.severity_score for o in first_half) / len(first_half)
-                avg_second = sum(o.severity_score for o in second_half) / len(second_half)
-                if avg_second > avg_first * 1.2:
-                    trend_direction = "worsening"
-                elif avg_second < avg_first * 0.8:
-                    trend_direction = "improving"
-                else:
-                    trend_direction = "stable"
-            else:
-                trend_direction = "insufficient_data"
+            # Determine trend direction via pluggable strategy
+            severity_series = [o.severity_score for o in tracker.observations]
+            trend_direction = self._trend.compute(severity_series)
 
             trend = TrendEvidence(
                 prevalence=prevalence,
@@ -472,11 +472,17 @@ class Diagnoser:
             # Collect all opportunity_tags from observations (deduplicated, ordered)
             all_tags = []
             seen_tags = set()
+            all_suppresses = []
+            seen_suppresses = set()
             for obs in tracker.observations:
                 for tag in obs.opportunity_tags:
                     if tag not in seen_tags and tag != "none":
                         all_tags.append(tag)
                         seen_tags.add(tag)
+                for tag in obs.suppresses_tags:
+                    if tag not in seen_suppresses:
+                        all_suppresses.append(tag)
+                        seen_suppresses.add(tag)
 
             summary = self._build_finding_summary(
                 fact_type=fact_type,
@@ -490,18 +496,39 @@ class Diagnoser:
             )
 
             layer, _ = self._split_scope(scope)
+            # Forward evidence metrics from the peak observation so the
+            # optimizer can compute target values (e.g., Amdahl's Law).
+            peak_metrics = self._observation_metrics(peak_obs)
+            # Filter to float-convertible, non-null values only.
+            # The fact engine converts NaN/NA to None via _to_scalar,
+            # so we must handle None explicitly.
+            key_metrics = {}
+            for k, v in peak_metrics.items():
+                if v is None:
+                    continue
+                try:
+                    fv = float(v)
+                    # Skip NaN (can appear if _to_scalar didn't catch it)
+                    if fv != fv:  # NaN check
+                        continue
+                    key_metrics[k] = fv
+                except (TypeError, ValueError):
+                    pass
             finding = DiagnosisFinding(
                 finding_type=fact_type,
                 scope=scope,
                 layer=layer,
                 motif=motif,
                 severity=peak_obs.severity_label,
+                severity_score=peak_obs.severity_score,
                 confidence=confidence,
                 trend=trend,
                 contributing_facts=contributing_facts,
                 recommendation_bundle=recommendation,
                 summary=summary,
                 opportunity_tags=all_tags,
+                suppresses_tags=all_suppresses,
+                key_metrics=key_metrics,
             )
             findings.append(finding)
 
@@ -684,12 +711,23 @@ class Diagnoser:
     def _publish_findings(self, producer, findings, publish_mode: str):
         """Publish DiagnosisFindings to Mofka for optimizer consumption."""
         for finding in findings:
+            logger.debug(
+                "diagnoser.finding.detail",
+                finding_type=finding.finding_type,
+                opportunity_tags=finding.opportunity_tags,
+                key_metrics=finding.key_metrics,
+                severity=finding.severity,
+                persistence=finding.trend.persistence,
+                trend_direction=finding.trend.trend_direction,
+                publish_mode=publish_mode,
+            )
             payload_dict = {
                 "finding_type": finding.finding_type,
                 "scope": finding.scope,
                 "layer": finding.layer,
                 "motif": finding.motif,
                 "severity": finding.severity,
+                "severity_score": finding.severity_score,
                 "confidence": finding.confidence,
                 "prevalence": finding.trend.prevalence,
                 "persistence": finding.trend.persistence,
@@ -699,9 +737,11 @@ class Diagnoser:
                 "contributing_facts": finding.contributing_facts,
                 "recommendation_bundle": finding.recommendation_bundle,
                 "opportunity_tags": finding.opportunity_tags,
+                "suppresses_tags": finding.suppresses_tags,
                 "summary": finding.summary,
                 "window_index": finding.trend.last_seen_window,
                 "publish_mode": publish_mode,
+                "key_metrics": finding.key_metrics,
             }
             payload = json.dumps(payload_dict).encode("utf-8")
             metadata = {

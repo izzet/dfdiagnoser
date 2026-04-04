@@ -23,13 +23,16 @@ class DiagnosisFinding:
     scope: str
     layer: Optional[str]
     motif: str  # "warmup_transient", "persistent_pressure", "rank_skew_induced", "checkpoint_tail_risk", "unclassified"
-    severity: str
+    severity: str  # human-readable label for logging
+    severity_score: float  # continuous [0.0, 1.0] for gating/scaling
     confidence: float
     trend: TrendEvidence
     contributing_facts: List[Tuple[str, str]]  # list of (fact_type, scope)
     recommendation_bundle: str
     summary: str
     opportunity_tags: List[str] = dc.field(default_factory=list)
+    suppresses_tags: List[str] = dc.field(default_factory=list)
+    key_metrics: Dict[str, float] = dc.field(default_factory=dict)
 
 
 @dc.dataclass

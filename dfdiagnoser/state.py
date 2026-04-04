@@ -13,6 +13,7 @@ class FactObservation:
     severity_label: str
     evidence: Dict[str, Any] = dc.field(default_factory=dict)
     opportunity_tags: List[str] = dc.field(default_factory=list)
+    suppresses_tags: List[str] = dc.field(default_factory=list)
 
 
 class FactTracker:
