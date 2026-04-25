@@ -595,7 +595,7 @@ class Diagnoser:
             f"trend={trend_direction}",
         ]
 
-        if fact_type == "excessive_metadata_access":
+        if fact_type == "metadata_dominance":
             peak_share = self._metric_by_suffix(metrics, "metadata_time_frac_parent")
             if peak_share is not None:
                 parts.append(f"peak_metadata_share={peak_share:.2f}")
@@ -647,7 +647,7 @@ class Diagnoser:
         if onset_window <= 1 and trend_direction == "improving" and prevalence < 0.4:
             return "warmup_transient", "none", 0.7, contributing_facts
 
-        if fact_type == "excessive_metadata_access":
+        if fact_type == "metadata_dominance":
             if layer == "reader_posix" and prevalence > 0.5 and persistence > 2:
                 return "metadata_bound", "metadata_reduction", 0.8, contributing_facts
             if layer == "checkpoint_posix" and prevalence > 0.3 and persistence > 1:

@@ -76,7 +76,7 @@ def test_build_longitudinal_summary_classifies_reader_metadata_bound():
             diagnoser,
             [
                 {
-                    "fact_type": "excessive_metadata_access",
+                    "fact_type": "metadata_dominance",
                     "scope": {"layer": "reader_posix", "entity": "1", "rank_set": "all"},
                     "window": {"epoch": diagnoser.state.current_window + 1},
                     "severity": {"score": 0.7, "label": "high"},
@@ -96,7 +96,7 @@ def test_build_longitudinal_summary_classifies_reader_metadata_bound():
 
     finding = _finding_for(
         diagnoser._build_longitudinal_summary(),
-        "excessive_metadata_access",
+        "metadata_dominance",
         "reader_posix:epoch",
     )
 
@@ -196,7 +196,7 @@ def test_build_control_findings_uses_current_window_and_fresh_scope():
         "view_type": "epoch",
         "facts": [
             {
-                "fact_type": "excessive_metadata_access",
+                "fact_type": "metadata_dominance",
                 "scope": {"layer": "reader_posix", "entity": "1", "rank_set": "all"},
                 "window": {"epoch": 1},
                 "severity": {"score": 0.7, "label": "high"},
@@ -259,6 +259,6 @@ def test_build_control_findings_uses_current_window_and_fresh_scope():
     assert second_control[0].scope == "checkpoint_posix:epoch"
     assert second_control[0].finding_type == "small_write_dominance"
     assert all(
-        finding.finding_type != "excessive_metadata_access"
+        finding.finding_type != "metadata_dominance"
         for finding in second_control
     )
