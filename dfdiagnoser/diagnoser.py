@@ -40,6 +40,11 @@ class Diagnoser:
         self._trend: TrendStrategy = get_trend_strategy(
             trend_strategy, lookback=trend_lookback, **trend_kwargs,
         )
+        # Which observation's evidence metrics get forwarded in a finding (see _build_findings):
+        #   "peak"    (default, historical): the max-severity observation over the whole run.
+        #   "current": the observation for the window being emitted -- required by a CLOSED-LOOP
+        #              controller, which must act on THIS window's metrics.
+        self._metrics_from = os.environ.get("DFDIAGNOSER_METRICS_FROM", "peak").lower()
 
     def diagnose_checkpoint(self, checkpoint_dir: str, metric_boundaries: dict = {}):
         if not os.path.exists(checkpoint_dir):
@@ -498,7 +503,16 @@ class Diagnoser:
             layer, _ = self._split_scope(scope)
             # Forward evidence metrics from the peak observation so the
             # optimizer can compute target values (e.g., Amdahl's Law).
-            peak_metrics = self._observation_metrics(peak_obs)
+            # DFDIAGNOSER_METRICS_FROM=current instead forwards THIS window's observation. Needed for
+            # closed-loop control: with a threshold-free rule (constant severity_score) every
+            # observation ties, so max() returns the FIRST one and every finding would carry the
+            # stale window-1 metrics forever (observed: 20 identical findings while persistence 1..20).
+            src_obs = peak_obs
+            if self._metrics_from == "current" and tracker.observations:
+                cur = ([o for o in tracker.observations if o.window_index == window_index]
+                       if window_index is not None else [])
+                src_obs = cur[-1] if cur else tracker.observations[-1]
+            peak_metrics = self._observation_metrics(src_obs)
             # Filter to float-convertible, non-null values only.
             # The fact engine converts NaN/NA to None via _to_scalar,
             # so we must handle None explicitly.
