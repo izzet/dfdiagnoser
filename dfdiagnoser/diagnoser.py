@@ -3,6 +3,7 @@ import io
 import json
 import os
 import signal
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,8 +27,20 @@ def _sigterm_handler(signum, frame):
 
 
 def install_shutdown_handler():
+    """Install the SIGTERM handler. No-op off the main thread.
+
+    `signal.signal` raises ValueError anywhere but the main thread, and under the Option C node
+    agent (LIVEFLOW-ARCHITECTURE.md sec 6) this diagnoser runs as ONE THREAD alongside the
+    analyzer and optimizer rather than owning a process. Signal disposition is process-wide, so a
+    stage thread was never the right place to set it.
+
+    Same change as dfanalyzer's and dfoptimizer's install_shutdown_handler. All three components
+    made this assumption independently, because until now each was always its own process.
+    """
     global _shutdown_requested
     _shutdown_requested = False
+    if threading.current_thread() is not threading.main_thread():
+        return
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
 
@@ -100,7 +113,7 @@ class Diagnoser:
         pull_timeout_ms: int = 1000,
         output_topic: str = "",
     ):
-        from .streaming.mofka_io import open_consumer, open_producer
+        from .streaming.transport import ack_event, open_consumer, open_producer
 
         output_handler = output_handler or (lambda result: None)
 
@@ -201,7 +214,7 @@ class Diagnoser:
                 # Check for stop sentinel
                 if metadata.get("name") == stop_name:
                     logger.info("diagnoser.stream.stop_sentinel", event_count=event_count)
-                    event.acknowledge()
+                    ack_event(event)
                     break
 
                 try:
@@ -246,7 +259,7 @@ class Diagnoser:
                 # window indices so persistence tracking works correctly.
                 if artifact_type == "analysis_facts":
                     self.state.advance_window()
-                event.acknowledge()
+                ack_event(event)
                 future = consumer.pull()
 
             if _shutdown_requested:

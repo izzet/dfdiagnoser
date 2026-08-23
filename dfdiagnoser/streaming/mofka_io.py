@@ -81,3 +81,19 @@ def open_producer(
         ordering=mofka.Ordering.Strict,
     )
     return driver, producer
+
+
+# Acknowledgement is DISABLED by default. Full rationale and measurements in
+# dfoptimizer/streaming/mofka_io.py::ack_event and LIVEFLOW-STATUS sec 60.
+#
+# Short version: on diaspora-stream-api 0.5.1, acking an event drawn from a multi-event
+# batch permanently stops delivery to that consumer. The diagnoser happens to survive it
+# today only because the analyzer feeds it one event per flush; that is luck, not design,
+# and it breaks the moment the analyzer flushes two windows together. Our consumers are
+# PID-named against per-run, memory-backed topics, so they never resume an offset and the
+# ack carries no information.
+#
+# Set LIVEFLOW_MOFKA_ACK=1 to restore the old behaviour.
+def ack_event(event) -> None:
+    if os.environ.get("LIVEFLOW_MOFKA_ACK", "0") == "1":
+        event.acknowledge()
