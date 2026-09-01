@@ -57,7 +57,21 @@ class Diagnoser:
         #   "peak"    (default, historical): the max-severity observation over the whole run.
         #   "current": the observation for the window being emitted -- required by a CLOSED-LOOP
         #              controller, which must act on THIS window's metrics.
-        self._metrics_from = os.environ.get("DFDIAGNOSER_METRICS_FROM", "peak").lower()
+        # DEFAULT IS "current". "peak" forwards the metrics of the highest-severity observation,
+        # which is silently broken for every threshold-free rule set: those emit a CONSTANT
+        # severity, so max() ties, returns the FIRST observation, and every finding thereafter
+        # carries window 0's metrics forever. Measured on DLIO: ten consecutive findings with
+        # byte-identical fetch/compute times (input 2.4045, compute 1.2722, wall 3.6767) while the
+        # analyzer underneath was emitting fetch 3.05, 1.81, 2.38, 1.36, 2.23, ... per window. A
+        # planner that learns from the objective cannot learn anything from that, and nothing in
+        # the logs says the values are stale.
+        #
+        # Only setup_env_halo3d.sh set "current", and halo3d was the one workload already running
+        # threshold-free rules -- so the coupling was known and applied in exactly one place.
+        # Now that threshold-free is the standing direction, the safe default is the one that
+        # works with it. DFDIAGNOSER_METRICS_FROM=peak restores the old behaviour for reproducing
+        # earlier gated runs.
+        self._metrics_from = os.environ.get("DFDIAGNOSER_METRICS_FROM", "current").lower()
 
     def diagnose_checkpoint(self, checkpoint_dir: str, metric_boundaries: dict = {}):
         if not os.path.exists(checkpoint_dir):
