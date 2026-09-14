@@ -72,6 +72,10 @@ class Diagnoser:
         # works with it. DFDIAGNOSER_METRICS_FROM=peak restores the old behaviour for reproducing
         # earlier gated runs.
         self._metrics_from = os.environ.get("DFDIAGNOSER_METRICS_FROM", "current").lower()
+        # Native control-window facts carry their authoritative identity in the
+        # envelope.  Legacy epoch facts retain arrival-order compatibility.
+        self._last_fact_window_index = self.state.current_window
+        self._last_facts_native_window = False
 
     def diagnose_checkpoint(self, checkpoint_dir: str, metric_boundaries: dict = {}):
         if not os.path.exists(checkpoint_dir):
@@ -240,7 +244,7 @@ class Diagnoser:
                         # longitudinal snapshots.
                         if findings_producer is not None:
                             control_findings = self._build_control_findings(
-                                window_index=self.state.current_window,
+                                window_index=self._last_fact_window_index,
                                 touched_keys=touched_keys,
                             )
                             if control_findings:
@@ -252,7 +256,7 @@ class Diagnoser:
                                 logger.info(
                                     "diagnoser.findings.control",
                                     count=len(control_findings),
-                                    window=self.state.current_window,
+                                    window=self._last_fact_window_index,
                                 )
                     else:
                         self._handle_flat_view(
@@ -271,7 +275,7 @@ class Diagnoser:
                 # boundaries), not after flat_view events which are just scored
                 # data.  This ensures consecutive epochs produce consecutive
                 # window indices so persistence tracking works correctly.
-                if artifact_type == "analysis_facts":
+                if artifact_type == "analysis_facts" and not self._last_facts_native_window:
                     self.state.advance_window()
                 ack_event(event)
                 future = consumer.pull()
@@ -366,6 +370,31 @@ class Diagnoser:
         envelope = json.loads(payload.decode("utf-8"))
         facts = envelope.get("facts", [])
 
+        native_windows = set()
+        for fact in facts:
+            window = fact.get("window", {}) if isinstance(fact, dict) else {}
+            if isinstance(window, dict) and window.get("view_type") == "window":
+                value = window.get("window")
+                try:
+                    native_windows.add(int(value))
+                except (TypeError, ValueError):
+                    raise ValueError("native window fact is missing an integer window identity")
+        if native_windows:
+            if len(native_windows) != 1:
+                raise ValueError("one facts envelope cannot mix native control windows")
+            authoritative_window = native_windows.pop()
+            if authoritative_window < self._last_fact_window_index:
+                raise ValueError(
+                    "native control window arrived out of order: %s < %s"
+                    % (authoritative_window, self._last_fact_window_index)
+                )
+            self.state.current_window = authoritative_window
+            self._last_fact_window_index = authoritative_window
+            self._last_facts_native_window = True
+        else:
+            self._last_fact_window_index = self.state.current_window
+            self._last_facts_native_window = False
+
         logger.info(
             "analysis_facts.received",
             fact_count=len(facts),
@@ -411,7 +440,7 @@ class Diagnoser:
             epoch = window.get("epoch") if isinstance(window, dict) else None
 
             obs = FactObservation(
-                window_index=self.state.current_window,
+                window_index=self._last_fact_window_index,
                 epoch=epoch,
                 severity_score=severity_score,
                 severity_label=severity_label,
@@ -425,7 +454,7 @@ class Diagnoser:
 
             logger.info(
                 "diagnoser.fact.recorded",
-                window_index=self.state.current_window,
+                window_index=self._last_fact_window_index,
                 fact_type=fact.get("fact_type"),
                 scope=scope_key,
                 severity_score=round(severity_score, 3),

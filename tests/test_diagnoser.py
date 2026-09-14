@@ -68,6 +68,58 @@ def test_handle_analysis_facts_separates_layer_scoped_trackers():
     assert ("small_read_dominance", "checkpoint_posix:epoch") in tracker_keys
 
 
+def test_native_window_identity_is_authoritative_and_never_renumbered():
+    diagnoser = Diagnoser()
+
+    def deliver(window, fact_type="input_compute_signal"):
+        return diagnoser._handle_analysis_facts(
+            _FakeEvent(json.dumps({
+                "view_type": "window",
+                "facts": [{
+                    "fact_type": fact_type,
+                    "scope": {"layer": "reader_posix", "entity": "window", "rank_set": "all"},
+                    "window": {"view_type": "window", "window": window, "epoch": 3, "step": 17},
+                    "severity": {"score": 0.7, "label": "high"},
+                    "opportunity_tags": ["reader_parallelism"],
+                    "evidence": {"metrics": {"active_time": 1.0}},
+                }],
+            }).encode("utf-8")), metadata={}
+        )
+
+    first = deliver(9)
+    assert diagnoser.state.current_window == 9
+    assert diagnoser._build_control_findings(9, first)[0].trend.last_seen_window == 9
+
+    # A second envelope for the same control window remains at 9 rather than
+    # becoming an arrival-order pseudo-window.
+    deliver(9, fact_type="operation_family_time_disproportion")
+    assert diagnoser.state.current_window == 9
+    deliver(12)
+    assert diagnoser.state.current_window == 12  # genuine missing-window gap survives
+
+
+def test_native_window_conflict_and_out_of_order_are_rejected():
+    diagnoser = Diagnoser()
+
+    def event(windows):
+        return _FakeEvent(json.dumps({
+            "view_type": "window",
+            "facts": [{
+                "fact_type": "input_compute_signal",
+                "scope": {"layer": "reader_posix", "entity": "window", "rank_set": "all"},
+                "window": {"view_type": "window", "window": window},
+                "severity": {"score": 0.7, "label": "high"},
+                "evidence": {"metrics": {"active_time": 1.0}},
+            } for window in windows],
+        }).encode("utf-8"))
+
+    with pytest.raises(ValueError, match="mix native control windows"):
+        diagnoser._handle_analysis_facts(event([9, 10]), metadata={})
+    diagnoser._handle_analysis_facts(event([10]), metadata={})
+    with pytest.raises(ValueError, match="out of order"):
+        diagnoser._handle_analysis_facts(event([9]), metadata={})
+
+
 def test_build_longitudinal_summary_classifies_reader_metadata_bound():
     diagnoser = Diagnoser()
 
