@@ -153,6 +153,7 @@ class Diagnoser:
         facts_count = 0
         error_count = 0
         last_event_time = None  # None until first event received
+        upstream_eos = False
 
         logger.info(
             "diagnoser.stream.start",
@@ -233,6 +234,7 @@ class Diagnoser:
                 if metadata.get("name") == stop_name:
                     logger.info("diagnoser.stream.stop_sentinel", event_count=event_count)
                     ack_event(event)
+                    upstream_eos = True
                     break
 
                 try:
@@ -263,6 +265,14 @@ class Diagnoser:
                             event, metadata, metric_boundaries, output_handler
                         )
                         flat_view_count += 1
+                        # A window flat view is the analyzer's completion watermark.
+                        # It may follow a fact-bearing window or be the only artifact
+                        # for a no-fact window.  It never represents a diagnosis, and
+                        # therefore cannot initiate control by itself.
+                        if findings_producer is not None:
+                            self._publish_window_completion(
+                                findings_producer, metadata
+                            )
                 except Exception:
                     error_count += 1
                     logger.exception(
@@ -322,6 +332,13 @@ class Diagnoser:
                         publish_mode="summary",
                     )
 
+            # EOS is a FIFO boundary, not an idle timeout.  Forward it only after any
+            # longitudinal summary, so the optimizer drains every finding before terminating.
+            if upstream_eos and findings_producer is not None:
+                findings_producer.push(metadata={"name": stop_name}, data=b"")
+                findings_producer.flush()
+                logger.info("diagnoser.stream.stop_forwarded", stop_name=stop_name)
+
             del consumer
             del driver
 
@@ -373,13 +390,23 @@ class Diagnoser:
         native_windows = set()
         for fact in facts:
             window = fact.get("window", {}) if isinstance(fact, dict) else {}
-            if isinstance(window, dict) and window.get("view_type") == "window":
+            # A proc_name fact may be sourced from the diagnostic view while
+            # carrying the analyzer-owned completed control-window identity.
+            # Native ordering depends on that identity, not on pretending the
+            # source view itself is the aggregate window view.
+            if isinstance(window, dict) and window.get("window") is not None:
                 value = window.get("window")
                 try:
                     native_windows.add(int(value))
                 except (TypeError, ValueError):
                     raise ValueError("native window fact is missing an integer window identity")
         if native_windows:
+            if any(
+                not isinstance((fact.get("window", {}) if isinstance(fact, dict) else {}), dict)
+                or (fact.get("window", {}) if isinstance(fact, dict) else {}).get("window") is None
+                for fact in facts
+            ):
+                raise ValueError("native control facts envelope mixes missing window provenance")
             if len(native_windows) != 1:
                 raise ValueError("one facts envelope cannot mix native control windows")
             authoritative_window = native_windows.pop()
@@ -403,6 +430,10 @@ class Diagnoser:
 
         touched_keys = set()
         for fact in facts:
+            metrics = fact.get("evidence", {}).get("metrics", {})
+            if metrics.get("liveflow_v1_attribution") == 1.0 and metrics.get("planner_history_ready") != 1:
+                logger.info("diagnoser.liveflow_v1.startup_skipped", window=self._last_fact_window_index)
+                continue
             logger.debug("diagnoser.fact.detail", **fact)
             # severity is a nested dict: {"score": float, "label": str, ...}
             severity = fact.get("severity", {})
@@ -832,6 +863,9 @@ class Diagnoser:
                     motif=finding.motif,
                     publish_mode=publish_mode,
                     tags=finding.opportunity_tags,
+                    # Retain the exact serialized metrics sent downstream so a
+                    # diagnostic can join finding and post-horizon fact evidence.
+                    payload=payload.decode("utf-8"),
                 )
             except Exception:
                 logger.exception("diagnoser.finding.publish_failed")
@@ -841,6 +875,36 @@ class Diagnoser:
             logger.info("diagnoser.findings.flushed", count=len(findings))
         except Exception:
             logger.exception("diagnoser.findings.flush_failed")
+
+    def _publish_window_completion(self, producer, metadata):
+        """Forward a native window watermark without creating a finding.
+
+        The optimizer uses this only to finalize a previously accumulated
+        fact-bearing window.  Missing or malformed provenance is ignored, so
+        arrival order can never become a synthetic control window.
+        """
+        if metadata.get("view_type") != "window":
+            return
+        try:
+            window_index = int(metadata["window_index"])
+        except (KeyError, TypeError, ValueError):
+            logger.warning("diagnoser.window_completion.missing_native_window")
+            return
+        if window_index < 0:
+            logger.warning("diagnoser.window_completion.invalid_native_window",
+                           window_index=window_index)
+            return
+        try:
+            producer.push(
+                metadata={"type": "control_window_complete", "window_index": window_index},
+                data=json.dumps({"window_index": window_index}).encode("utf-8"),
+            )
+            producer.flush()
+            logger.info("diagnoser.window_completion.published",
+                        window_index=window_index)
+        except Exception:
+            logger.exception("diagnoser.window_completion.publish_failed",
+                             window_index=window_index)
 
     def _diagnose(self, data: dict):
         pass

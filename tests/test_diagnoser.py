@@ -13,6 +13,18 @@ class _FakeEvent:
         self.data = payload
 
 
+class _FakeProducer:
+    def __init__(self):
+        self.messages = []
+        self.flushes = 0
+
+    def push(self, *, metadata, data):
+        self.messages.append((metadata, json.loads(data.decode("utf-8"))))
+
+    def flush(self):
+        self.flushes += 1
+
+
 def _record_window(diagnoser: Diagnoser, facts):
     envelope = {
         "view_type": "epoch",
@@ -118,6 +130,53 @@ def test_native_window_conflict_and_out_of_order_are_rejected():
     diagnoser._handle_analysis_facts(event([10]), metadata={})
     with pytest.raises(ValueError, match="out of order"):
         diagnoser._handle_analysis_facts(event([9]), metadata={})
+
+
+def test_proc_name_fact_keeps_source_view_and_uses_native_window_ordering():
+    diagnoser = Diagnoser()
+    event = _FakeEvent(json.dumps({
+        "view_type": "proc_name",
+        "facts": [{
+            "fact_type": "operation_family_time_disproportion",
+            "scope": {"layer": "reader_posix", "entity": "reader_posix_read.worker_pool", "rank_set": "all"},
+            "window": {"view_type": "proc_name", "window": 17},
+            "severity": {"score": 0.7, "label": "high"},
+            "opportunity_tags": ["reader_parallelism"],
+            "evidence": {"metrics": {"reader_posix_read_ops_slope": 0.3}},
+        }],
+    }).encode("utf-8"))
+
+    diagnoser._handle_analysis_facts(event, metadata={})
+    assert diagnoser.state.current_window == 17
+    assert diagnoser._last_facts_native_window is True
+
+    mixed = _FakeEvent(json.dumps({
+        "view_type": "proc_name",
+        "facts": [
+            {"fact_type": "a", "scope": {}, "window": {"view_type": "proc_name", "window": 18}, "severity": {}},
+            {"fact_type": "b", "scope": {}, "window": {"view_type": "proc_name"}, "severity": {}},
+        ],
+    }).encode("utf-8"))
+    with pytest.raises(ValueError, match="mixes missing window provenance"):
+        diagnoser._handle_analysis_facts(mixed, metadata={})
+
+
+def test_window_completion_is_native_window_only_and_not_a_finding():
+    diagnoser = Diagnoser()
+    producer = _FakeProducer()
+    diagnoser._publish_window_completion(
+        producer, {"view_type": "window", "window_index": 17}
+    )
+    assert producer.messages == [
+        ({"type": "control_window_complete", "window_index": 17}, {"window_index": 17})
+    ]
+    assert producer.flushes == 1
+
+    diagnoser._publish_window_completion(
+        producer, {"view_type": "proc_name", "window_index": 17}
+    )
+    diagnoser._publish_window_completion(producer, {"view_type": "window"})
+    assert len(producer.messages) == 1
 
 
 def test_build_longitudinal_summary_classifies_reader_metadata_bound():
