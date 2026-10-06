@@ -32,7 +32,7 @@ class DiagnosisFinding:
     summary: str
     opportunity_tags: List[str] = dc.field(default_factory=list)
     suppresses_tags: List[str] = dc.field(default_factory=list)
-    key_metrics: Dict[str, float] = dc.field(default_factory=dict)
+    key_metrics: Dict[str, Any] = dc.field(default_factory=dict)  # floats, plus the string step_series
 
 
 @dc.dataclass

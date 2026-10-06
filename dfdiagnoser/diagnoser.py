@@ -17,6 +17,9 @@ from .utils.log_utils import console_block
 
 logger = structlog.get_logger()
 
+# Window evidence that is a string, not a number: forwarded to the optimizer as-is (see key_metrics below).
+_STRING_EVIDENCE = frozenset({"step_series"})
+
 _shutdown_requested = False
 
 
@@ -606,6 +609,11 @@ class Diagnoser:
             key_metrics = {}
             for k, v in peak_metrics.items():
                 if v is None:
+                    continue
+                if k in _STRING_EVIDENCE:
+                    # The window's per-step series travels as one string (dfoptimizer/step_series.py).
+                    if isinstance(v, str) and v:
+                        key_metrics[k] = v
                     continue
                 try:
                     fv = float(v)
