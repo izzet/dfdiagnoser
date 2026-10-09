@@ -263,6 +263,14 @@ class Diagnoser:
                                     count=len(control_findings),
                                     window=self._last_fact_window_index,
                                 )
+                            # The complete native facts envelope has now been consumed
+                            # and every control finding was published in FIFO order.
+                            # Scoring diagnostic flat views is not on the control path.
+                            if self._last_facts_native_window:
+                                self._publish_window_completion(findings_producer, {
+                                    "view_type": "window",
+                                    "window_index": self._last_fact_window_index,
+                                })
                     else:
                         self._handle_flat_view(
                             event, metadata, metric_boundaries, output_handler
